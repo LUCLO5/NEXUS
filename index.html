@@ -1,0 +1,747 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Nexus</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/d3/7.8.5/d3.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/topojson/3.0.2/topojson.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600;700&family=DM+Mono:wght@300;400;500&display=swap" rel="stylesheet">
+<style>
+*,*::before,*::after{margin:0;padding:0;box-sizing:border-box}
+:root{
+  --bg:#0c0f14;--map:#141920;--map-stroke:#232b38;--map-hover:#1c2430;
+  --panel:rgba(14,17,23,.82);--panel-border:rgba(255,255,255,.08);--panel-border-h:rgba(255,255,255,.15);
+  --t1:#e8eaed;--t2:#9aa0ac;--t3:#5c6370;--t4:#353b47;
+  --c-big4:#6b8cce;--c-acct:#7fa0c4;--c-bank:#d4a847;--c-asset:#a78bcc;
+  --c-pe:#c47a9b;--c-consult:#5fb896;--c-tech:#5cc4c4;--c-hedge:#cf7058;
+  --c-wealth:#d49a5a;--c-defense:#7a8899;--c-other:#6b7280;
+}
+html,body{height:100%;overflow:hidden;background:var(--bg);color:var(--t1);font-family:'DM Sans',system-ui,sans-serif}
+
+#map{position:fixed;inset:0;z-index:1}
+#map svg{width:100%;height:100%;display:block}
+.state{fill:var(--map);stroke:var(--map-stroke);stroke-width:.5;transition:fill .15s}
+.state:hover{fill:var(--map-hover)}
+.conn-line{stroke-width:.4;opacity:0;transition:opacity .3s}
+.conn-line.show{opacity:.25}
+.conn-line.hl{opacity:.7;stroke-width:1}
+.glass{background:var(--panel);border:1px solid var(--panel-border);backdrop-filter:blur(20px);-webkit-backdrop-filter:blur(20px)}
+
+.topbar{position:fixed;top:16px;left:16px;right:16px;z-index:10;display:flex;align-items:center;justify-content:space-between;padding:10px 20px;border-radius:10px;gap:16px}
+.brand{display:flex;align-items:center;gap:10px}
+.brand h1{font-size:17px;font-weight:600;letter-spacing:3px;text-transform:uppercase}
+.brand .dot{width:6px;height:6px;border-radius:50%;background:var(--c-tech);flex-shrink:0}
+.stats{display:flex;gap:20px;font-size:12px;color:var(--t2)}
+.stats b{color:var(--t1);font-weight:500;margin-left:3px}
+.top-actions{display:flex;gap:8px}
+.tbtn{background:rgba(255,255,255,.06);border:1px solid var(--panel-border);color:var(--t2);padding:6px 14px;font:12px 'DM Sans',sans-serif;font-weight:500;border-radius:6px;cursor:pointer;transition:all .2s;display:flex;align-items:center;gap:6px}
+.tbtn:hover{background:rgba(255,255,255,.1);color:var(--t1);border-color:var(--panel-border-h)}
+.tbtn svg{width:14px;height:14px;stroke:currentColor;fill:none;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+
+.filters{position:fixed;top:72px;left:16px;bottom:60px;width:260px;z-index:10;border-radius:10px;overflow:hidden;display:flex;flex-direction:column;transition:transform .3s ease,opacity .3s ease}
+.filters.hidden{transform:translateX(-280px);opacity:0;pointer-events:none}
+.filters-scroll{flex:1;overflow-y:auto;padding:0}
+.filters-scroll::-webkit-scrollbar{width:3px}
+.filters-scroll::-webkit-scrollbar-thumb{background:var(--t4);border-radius:2px}
+.f-sec{border-bottom:1px solid var(--panel-border);padding:14px 16px}
+.f-head{display:flex;justify-content:space-between;align-items:center;margin-bottom:8px}
+.f-title{font-size:10px;font-weight:600;letter-spacing:1.5px;text-transform:uppercase;color:var(--t3)}
+.f-cnt{font-size:10px;color:var(--t4);font-family:'DM Mono',monospace}
+.f-search{width:100%;background:rgba(255,255,255,.04);border:1px solid var(--panel-border);color:var(--t1);padding:5px 10px;font:11.5px 'DM Sans',sans-serif;border-radius:5px;outline:none;margin-bottom:6px;transition:border .2s}
+.f-search:focus{border-color:var(--panel-border-h)}
+.f-search::placeholder{color:var(--t4)}
+.f-item{display:flex;align-items:center;gap:6px;padding:3px 0;cursor:pointer;font-size:12px;color:var(--t3);transition:color .12s}
+.f-item:hover{color:var(--t1)}
+.f-item.on{color:var(--t1)}
+.f-item .dot{width:5px;height:5px;border-radius:50%;flex-shrink:0;opacity:.5}
+.f-item.on .dot{opacity:1}
+.f-item .lb{flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.f-item .bar{width:40px;height:2px;background:rgba(255,255,255,.06);border-radius:1px;overflow:hidden;flex-shrink:0}
+.f-item .bf{height:100%;border-radius:1px;transition:width .3s}
+.f-item .ct{font-family:'DM Mono',monospace;font-size:10px;color:var(--t4);min-width:18px;text-align:right}
+.f-item.on .ct{color:var(--t2)}
+.f-clear{width:100%;background:none;border:1px solid var(--panel-border);color:var(--t3);padding:7px;font:11px 'DM Sans',sans-serif;font-weight:500;border-radius:6px;cursor:pointer;transition:all .2s;letter-spacing:1px;text-transform:uppercase}
+.f-clear:hover{border-color:var(--panel-border-h);color:var(--t1)}
+
+.detail{position:fixed;top:72px;right:16px;width:280px;z-index:10;border-radius:10px;overflow:hidden;transition:transform .3s ease,opacity .3s ease}
+.detail.hidden{transform:translateX(300px);opacity:0;pointer-events:none}
+.detail-inner{padding:18px;max-height:calc(100vh - 140px);overflow-y:auto}
+.detail-inner::-webkit-scrollbar{width:3px}
+.detail-inner::-webkit-scrollbar-thumb{background:var(--t4);border-radius:2px}
+.d-close{position:absolute;top:12px;right:14px;background:none;border:none;color:var(--t3);font-size:18px;cursor:pointer;line-height:1}
+.d-close:hover{color:var(--t1)}
+.d-city{font-size:20px;font-weight:500;margin-bottom:2px;letter-spacing:.5px}
+.d-sub{font-size:12px;color:var(--t3);margin-bottom:14px}
+.d-stats{display:grid;grid-template-columns:1fr 1fr;gap:1px;background:var(--panel-border);border-radius:6px;overflow:hidden;margin-bottom:14px}
+.d-stat{background:rgba(255,255,255,.03);padding:10px;text-align:center}
+.d-stat .v{font-size:20px;font-weight:500;font-family:'DM Mono',monospace}
+.d-stat .l{font-size:9px;letter-spacing:1.5px;text-transform:uppercase;color:var(--t3);margin-top:2px}
+.d-label{font-size:10px;font-weight:600;letter-spacing:1.5px;text-transform:uppercase;color:var(--t3);margin-bottom:8px}
+.d-person{padding:8px 0;border-bottom:1px solid var(--panel-border)}
+.d-person:last-child{border:none}
+.d-name{font-size:13px;font-weight:500}
+.d-pos{font-size:11px;color:var(--t3);margin-top:1px}
+.d-comp{font-size:11px;color:var(--t2)}
+.d-more{font-size:11px;color:var(--t3);padding-top:8px}
+
+.tip{position:fixed;z-index:100;padding:12px 16px;border-radius:8px;pointer-events:none;display:none;max-width:260px;line-height:1.5}
+.tip .tip-city{font-size:15px;font-weight:500;margin-bottom:3px}
+.tip .tip-info{font-size:11.5px;color:var(--t2)}
+.tip .tip-info b{color:var(--t1);font-weight:500}
+.tip .tip-comps{font-size:11px;color:var(--t3);margin-top:4px}
+
+.legend{position:fixed;bottom:16px;right:16px;z-index:10;padding:12px 16px;border-radius:8px;display:flex;flex-wrap:wrap;gap:10px;max-width:500px}
+.leg-item{display:flex;align-items:center;gap:5px;font-size:10px;color:var(--t3);white-space:nowrap;cursor:pointer;transition:color .15s}
+.leg-item:hover{color:var(--t1)}
+.leg-dot{width:7px;height:7px;border-radius:50%}
+
+.zoom-ctrl{position:fixed;bottom:16px;left:16px;z-index:10;display:flex;flex-direction:column;border-radius:8px;overflow:hidden}
+.zoom-ctrl.shift{left:284px}
+.z-btn{width:36px;height:36px;background:var(--panel);border:none;border-bottom:1px solid var(--panel-border);color:var(--t2);font-size:18px;cursor:pointer;display:flex;align-items:center;justify-content:center;transition:all .15s}
+.z-btn:last-child{border-bottom:none}
+.z-btn:hover{background:rgba(255,255,255,.08);color:var(--t1)}
+
+/* MODAL */
+.modal-bg{position:fixed;inset:0;background:rgba(12,15,20,.9);display:none;align-items:center;justify-content:center;z-index:200;backdrop-filter:blur(8px)}
+.modal-bg.show{display:flex}
+.modal{background:var(--panel);border:1px solid var(--panel-border);padding:40px 48px;border-radius:12px;text-align:center;max-width:440px;width:90%}
+.modal h2{font-size:18px;font-weight:500;letter-spacing:2px;margin-bottom:4px}
+.modal p{color:var(--t3);font-size:13px;margin-bottom:22px;line-height:1.6}
+.modal .mbtn{background:rgba(255,255,255,.08);border:1px solid var(--panel-border-h);color:var(--t1);padding:9px 28px;font:13px 'DM Sans',sans-serif;font-weight:500;border-radius:6px;cursor:pointer;transition:all .2s}
+.modal .mbtn:hover{background:rgba(255,255,255,.15)}
+.modal .mcancel{display:block;margin:14px auto 0;background:none;border:none;color:var(--t4);font:12px 'DM Sans',sans-serif;cursor:pointer}
+.modal .mcancel:hover{color:var(--t2)}
+.modal .mhint{margin-top:20px;font-size:11px;color:var(--t4);line-height:1.8;text-align:left;border-top:1px solid var(--panel-border);padding-top:14px;font-family:'DM Mono',monospace}
+.modal.dragover{border-color:var(--panel-border-h);background:rgba(20,25,32,.9)}
+.node-label{font-family:'DM Mono',monospace;pointer-events:none;font-weight:500}
+
+/* TOAST */
+.toast{position:fixed;top:80px;left:50%;transform:translateX(-50%) translateY(-20px);z-index:300;padding:14px 24px;border-radius:10px;opacity:0;transition:all .4s ease;pointer-events:none;text-align:center;min-width:280px}
+.toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
+.toast .toast-title{font-size:14px;font-weight:600;margin-bottom:4px}
+.toast .toast-body{font-size:12px;color:var(--t2);line-height:1.5}
+.toast .toast-body b{color:var(--t1);font-weight:500}
+.toast.error{border-color:rgba(207,112,88,.3)}
+.toast.error .toast-title{color:#cf7058}
+
+/* UPLOAD AREA */
+.upload-zone{border:2px dashed var(--t4);border-radius:10px;padding:32px 20px;margin-bottom:16px;transition:all .25s;cursor:pointer}
+.upload-zone:hover,.upload-zone.dragover{border-color:var(--t2);background:rgba(255,255,255,.03)}
+.upload-zone .uz-icon{font-size:28px;margin-bottom:8px;opacity:.4}
+.upload-zone .uz-main{font-size:13px;color:var(--t2);margin-bottom:4px}
+.upload-zone .uz-sub{font-size:11px;color:var(--t4)}
+
+/* PREVIEW TABLE */
+.preview{text-align:left;margin-top:16px;border-top:1px solid var(--panel-border);padding-top:14px}
+.preview h3{font-size:12px;font-weight:600;letter-spacing:1px;text-transform:uppercase;color:var(--t2);margin-bottom:10px}
+.preview-table{width:100%;border-collapse:collapse;font-size:11px}
+.preview-table th{text-align:left;padding:4px 8px;color:var(--t3);font-weight:500;border-bottom:1px solid var(--panel-border);font-size:10px;letter-spacing:1px;text-transform:uppercase}
+.preview-table td{padding:4px 8px;color:var(--t2);border-bottom:1px solid rgba(255,255,255,.03)}
+.preview-stats{display:flex;gap:16px;margin-bottom:12px;font-size:12px;color:var(--t3)}
+.preview-stats b{color:var(--t1);font-weight:500}
+.preview-actions{display:flex;gap:8px;margin-top:14px;justify-content:center}
+.preview-actions .mbtn.primary{background:rgba(92,196,196,.15);border-color:rgba(92,196,196,.3);color:#5cc4c4}
+.preview-actions .mbtn.primary:hover{background:rgba(92,196,196,.25)}
+
+@media(max-width:800px){.filters{width:220px}.stats{display:none}}
+</style>
+</head>
+<body>
+
+<div id="map"></div>
+
+<div class="topbar glass">
+  <div class="brand"><div class="dot"></div><h1>Nexus</h1></div>
+  <div class="stats">
+    <span>Nodes <b id="hn">0</b></span>
+    <span>Companies <b id="hc">0</b></span>
+    <span>States <b id="hs">0</b></span>
+  </div>
+  <div class="top-actions">
+    <button class="tbtn" id="filterToggle" onclick="toggleFilters()">
+      <svg viewBox="0 0 24 24"><path d="M4 6h16M7 12h10M10 18h4"/></svg>
+      Filters <span id="hf" style="font-family:'DM Mono',monospace;color:var(--t3)">0</span>
+    </button>
+    <button class="tbtn" onclick="showModal()">
+      <svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>
+      Import
+    </button>
+    <button class="tbtn" onclick="loadDemo()">Demo</button>
+  </div>
+</div>
+
+<div class="filters glass hidden" id="filterPanel">
+  <div class="filters-scroll" id="filterContent"></div>
+</div>
+
+<div class="detail glass hidden" id="detailCard"></div>
+<div class="tip glass" id="tip"></div>
+<div class="legend glass" id="legend"></div>
+
+<div class="zoom-ctrl glass" id="zoomCtrl">
+  <button class="z-btn" onclick="zoomIn()">+</button>
+  <button class="z-btn" onclick="zoomOut()">−</button>
+  <button class="z-btn" onclick="zoomReset()" style="font-size:12px">⟲</button>
+</div>
+
+<!-- TOAST NOTIFICATION -->
+<div class="toast glass" id="toast"></div>
+
+<!-- UPLOAD MODAL -->
+<div class="modal-bg" id="modalBg" onclick="if(event.target===this)hideModal()">
+  <div class="modal glass" id="modalBox">
+    <div id="modalContent">
+      <h2>Import Network</h2>
+      <p>Upload your LinkedIn connections CSV or any network dataset.</p>
+      <div class="upload-zone" id="uploadZone">
+        <div class="uz-icon">↑</div>
+        <div class="uz-main">Drag &amp; drop CSV here, or click to browse</div>
+        <div class="uz-sub">LinkedIn export, custom CSV, any format</div>
+      </div>
+      <input type="file" id="fileIn" accept=".csv,.txt" style="display:none">
+      <button class="mcancel" onclick="hideModal()">cancel</button>
+      <div class="mhint">
+        Auto-detects columns. Works with LinkedIn export<br>
+        (First Name, Last Name, Company, Position, Connected On)<br>
+        and custom CSVs with City/State/School/Industry fields.
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+// ════════════════════════════════════════════════════════════
+// INDUSTRY COLORS
+// ════════════════════════════════════════════════════════════
+const IC={"Big 4":"#6b8cce","Accounting":"#7fa0c4","Banking":"#d4a847","Asset Mgmt":"#a78bcc","Private Equity":"#c47a9b","Consulting":"#5fb896","Technology":"#5cc4c4","Hedge Fund":"#cf7058","Wealth Mgmt":"#d49a5a","Defense":"#7a8899","Other":"#6b7280"};
+
+// ════════════════════════════════════════════════════════════
+// CITY COORDINATES
+// ════════════════════════════════════════════════════════════
+const CITIES={"new york,ny":[40.71,-74],"los angeles,ca":[34.05,-118.24],"chicago,il":[41.88,-87.63],"houston,tx":[29.76,-95.37],"phoenix,az":[33.45,-112.07],"dallas,tx":[32.78,-96.8],"san francisco,ca":[37.77,-122.42],"austin,tx":[30.27,-97.74],"denver,co":[39.74,-105],"seattle,wa":[47.61,-122.33],"boston,ma":[42.36,-71.06],"atlanta,ga":[33.75,-84.39],"miami,fl":[25.76,-80.19],"washington,dc":[38.91,-77.04],"nashville,tn":[36.16,-86.78],"charlotte,nc":[35.23,-80.84],"san antonio,tx":[29.42,-98.49],"minneapolis,mn":[44.98,-93.27],"portland,or":[45.52,-122.68],"detroit,mi":[42.33,-83.05],"philadelphia,pa":[39.95,-75.17],"san diego,ca":[32.72,-117.16],"waco,tx":[31.55,-97.15],"scottsdale,az":[33.49,-111.93],"salt lake city,ut":[40.76,-111.89],"raleigh,nc":[35.78,-78.64],"tampa,fl":[27.95,-82.46],"columbus,oh":[39.96,-83],"indianapolis,in":[39.77,-86.16],"kansas city,mo":[39.1,-94.58],"pittsburgh,pa":[40.44,-80],"st. louis,mo":[38.63,-90.2],"las vegas,nv":[36.17,-115.14],"cincinnati,oh":[39.1,-84.51],"milwaukee,wi":[43.04,-87.91],"oklahoma city,ok":[35.47,-97.52],"richmond,va":[37.54,-77.44],"hartford,ct":[41.76,-72.68],"jacksonville,fl":[30.33,-81.66],"birmingham,al":[33.52,-86.81],"memphis,tn":[35.15,-90.05],"san jose,ca":[37.34,-121.89],"fort worth,tx":[32.75,-97.33],"el paso,tx":[31.76,-106.45],"tucson,az":[32.22,-110.97],"omaha,ne":[41.26,-95.94],"new orleans,la":[29.95,-90.07],"cleveland,oh":[41.50,-81.69],"boise,id":[43.62,-116.21],"des moines,ia":[41.59,-93.62],"louisville,ky":[38.25,-85.76],"baltimore,md":[39.29,-76.61],"albuquerque,nm":[35.08,-106.65],"sacramento,ca":[38.58,-121.49]};
+
+// State abbreviation to random coordinates fallback
+const STATE_COORDS={"al":[32.8,-86.8],"ak":[64,-153],"az":[34.2,-111.6],"ar":[34.8,-92.2],"ca":[37,-120],"co":[39,-105.5],"ct":[41.6,-72.7],"de":[39,-75.5],"fl":[28.5,-82],"ga":[33,-83.5],"hi":[20.5,-157],"id":[44.4,-114.6],"il":[40,-89],"in":[39.8,-86.2],"ia":[42,-93.5],"ks":[38.5,-98],"ky":[37.8,-85.7],"la":[31,-92],"me":[45.4,-69.2],"md":[39.3,-76.6],"ma":[42.3,-71.8],"mi":[44.3,-85.6],"mn":[46,-94.3],"ms":[32.6,-89.7],"mo":[38.5,-92.2],"mt":[47,-110],"ne":[41.5,-99.8],"nv":[39.8,-117],"nh":[43.7,-71.6],"nj":[40.2,-74.7],"nm":[34.5,-106],"ny":[42.2,-75],"nc":[35.5,-79.8],"nd":[47.5,-100.5],"oh":[40.4,-82.8],"ok":[35.5,-97.5],"or":[44,-120.5],"pa":[40.9,-77.8],"ri":[41.7,-71.5],"sc":[34,-81],"sd":[44.4,-100],"tn":[35.8,-86.4],"tx":[31.5,-99.3],"ut":[39.3,-111.7],"vt":[44,-72.7],"va":[37.5,-79],"wa":[47.4,-120.7],"wv":[38.6,-80.6],"wi":[44.6,-90],"wy":[43,-107.6],"dc":[38.91,-77.04]};
+
+const COMPS=["Deloitte","EY","PwC","KPMG","BDO","RSM","Grant Thornton","Goldman Sachs","JP Morgan","Morgan Stanley","BlackRock","Blackstone","KKR","Bain Capital","McKinsey","BCG","Bain & Company","Google","Microsoft","Amazon","Meta","Apple","Tesla","Palantir","Stripe","Coinbase","Citadel","Two Sigma","Point72","Bridgewater","Raymond James","Edward Jones","Fidelity","Vanguard","Charles Schwab","Wells Fargo","Bank of America","Citi","USAA","Lockheed Martin"];
+const POS=["Analyst","Senior Analyst","Associate","Senior Associate","Consultant","Manager","Senior Manager","Director","VP","Partner","Intern","Staff Accountant","Senior Accountant","Audit Associate","Tax Associate","Investment Analyst","Portfolio Manager","Software Engineer","Product Manager","Data Scientist","Financial Advisor"];
+const SCHOOLS=["Baylor University","UT Austin","Texas A&M","SMU","TCU","Rice University","Harvard","Stanford","Wharton","NYU Stern","Columbia","MIT","Duke","Georgetown","Michigan","USC","UCLA","Chicago Booth","Northwestern","Vanderbilt","Emory","Arizona State","Georgia Tech","UNC","Virginia Tech","Boston College","Notre Dame","Florida","Ohio State"];
+const IND={"Deloitte":"Big 4","EY":"Big 4","PwC":"Big 4","KPMG":"Big 4","BDO":"Accounting","RSM":"Accounting","Grant Thornton":"Accounting","Goldman Sachs":"Banking","JP Morgan":"Banking","Morgan Stanley":"Banking","BlackRock":"Asset Mgmt","Blackstone":"Private Equity","KKR":"Private Equity","Bain Capital":"Private Equity","McKinsey":"Consulting","BCG":"Consulting","Bain & Company":"Consulting","Google":"Technology","Microsoft":"Technology","Amazon":"Technology","Meta":"Technology","Apple":"Technology","Tesla":"Technology","Palantir":"Technology","Stripe":"Technology","Coinbase":"Technology","Citadel":"Hedge Fund","Two Sigma":"Hedge Fund","Point72":"Hedge Fund","Bridgewater":"Hedge Fund","Raymond James":"Wealth Mgmt","Edward Jones":"Wealth Mgmt","Fidelity":"Asset Mgmt","Vanguard":"Asset Mgmt","Charles Schwab":"Wealth Mgmt","Wells Fargo":"Banking","Bank of America":"Banking","Citi":"Banking","USAA":"Banking","Lockheed Martin":"Defense"};
+const FM=["James","Alex","Michael","Ryan","David","Chris","Daniel","Andrew","Tyler","Josh","Brandon","Justin","Matt","Kevin","Marcus","Eric","Jordan","Ethan","Noah","Will","Luke","Caleb","Nathan","Ben","Trey","Cole","Grant","Chase"];
+const FF=["Sarah","Emily","Jessica","Lauren","Ashley","Amanda","Rachel","Megan","Hannah","Olivia","Emma","Sophia","Ava","Isabella","Maya","Taylor","Morgan","Kayla","Brooke","Nicole","Samantha","Victoria","Natalie","Grace","Lily","Claire","Allison","Madison"];
+const LN=["Chen","Patel","Williams","Johnson","Smith","Garcia","Martinez","Anderson","Thompson","Taylor","Wilson","Moore","Jackson","Lee","Kim","Nguyen","Davis","Miller","Brown","Jones","Rodriguez","Walker","Hall","Young","King","Wright","Lopez","Scott","Adams","Mitchell","Roberts","Carter","Phillips","Evans","Turner","Campbell"];
+const rnd=a=>a[Math.floor(Math.random()*a.length)];
+
+function genDemo(){
+  const d=[];const ck=Object.keys(CITIES);
+  for(let i=0;i<130;i++){
+    const f=Math.random()>.5;const company=rnd(COMPS);const ckey=rnd(ck);const parts=ckey.split(',');
+    const dt=new Date(2022,0,1);dt.setDate(dt.getDate()+Math.floor(Math.random()*1580));
+    d.push({firstName:f?rnd(FF):rnd(FM),lastName:rnd(LN),company,position:rnd(POS),city:parts[0].trim(),state:parts[1].trim(),school:rnd(SCHOOLS),connectedOn:dt.toISOString().split('T')[0],industry:IND[company]||'Other',gender:f?'Female':'Male',lat:CITIES[ckey][0]+(Math.random()-.5)*.3,lng:CITIES[ckey][1]+(Math.random()-.5)*.3});
+  }
+  return d;
+}
+
+// ════════════════════════════════════════════════════════════
+// STATE
+// ════════════════════════════════════════════════════════════
+let allData=[],fData=[],sel=null,filtersOpen=false;
+let flt={industry:new Set(),company:new Set(),position:new Set(),state:new Set(),school:new Set(),gender:new Set()};
+let proj,svg,g,zoomBehavior;
+
+// ════════════════════════════════════════════════════════════
+// TOAST
+// ════════════════════════════════════════════════════════════
+function showToast(title,body,isError){
+  const t=document.getElementById('toast');
+  t.className='toast glass'+(isError?' error':'');
+  t.innerHTML=`<div class="toast-title">${title}</div><div class="toast-body">${body}</div>`;
+  requestAnimationFrame(()=>t.classList.add('show'));
+  setTimeout(()=>t.classList.remove('show'),isError?6000:4000);
+}
+
+// ════════════════════════════════════════════════════════════
+// MAP
+// ════════════════════════════════════════════════════════════
+async function initMap(){
+  const w=innerWidth,h=innerHeight;
+  svg=d3.select('#map').append('svg').attr('width',w).attr('height',h);
+  g=svg.append('g');
+  proj=d3.geoAlbersUsa().translate([w/2,h/2]).scale(Math.min(w,h)*1.4);
+  const path=d3.geoPath().projection(proj);
+  try{
+    const us=await d3.json('https://cdn.jsdelivr.net/npm/us-atlas@3/states-10m.json');
+    g.append('g').attr('id','statesG').selectAll('path')
+      .data(topojson.feature(us,us.objects.states).features)
+      .join('path').attr('d',path).attr('class','state');
+    g.append('path').datum(topojson.mesh(us,us.objects.states,(a,b)=>a!==b))
+      .attr('d',path).attr('fill','none').attr('stroke','var(--map-stroke)').attr('stroke-width',.5);
+  }catch(e){console.error(e)}
+  g.append('g').attr('id','linesG');
+  g.append('g').attr('id','nodesG');
+  zoomBehavior=d3.zoom().scaleExtent([.8,12]).on('zoom',e=>g.attr('transform',e.transform));
+  svg.call(zoomBehavior);
+  window.addEventListener('resize',()=>svg.attr('width',innerWidth).attr('height',innerHeight));
+}
+
+function zoomIn(){svg.transition().duration(300).call(zoomBehavior.scaleBy,1.5)}
+function zoomOut(){svg.transition().duration(300).call(zoomBehavior.scaleBy,.67)}
+function zoomReset(){svg.transition().duration(500).call(zoomBehavior.transform,d3.zoomIdentity)}
+
+// ════════════════════════════════════════════════════════════
+// RENDER NODES
+// ════════════════════════════════════════════════════════════
+function renderNodes(){
+  const nG=g.select('#nodesG').html('');
+  const lG=g.select('#linesG').html('');
+  const grp={};
+  fData.forEach(d=>{
+    const rLat=Math.round(d.lat*10)/10,rLng=Math.round(d.lng*10)/10;
+    const k=rLat+','+rLng;
+    if(!grp[k])grp[k]={lat:rLat,lng:rLng,city:d.city,state:d.state,people:[]};
+    grp[k].people.push(d);
+  });
+  const arr=Object.values(grp);
+  const mx=Math.max(...arr.map(c=>c.people.length),1);
+
+  const cc={};
+  arr.forEach(c=>{const pos=proj([c.lng,c.lat]);if(!pos)return;c._pos=pos;
+    c.people.forEach(p=>{if(!cc[p.company])cc[p.company]=[];cc[p.company].push(c)})});
+
+  Object.entries(cc).forEach(([comp,cities])=>{
+    if(cities.length<2)return;const color=IC[IND[comp]]||IC.Other;
+    for(let i=0;i<cities.length;i++)for(let j=i+1;j<cities.length;j++){
+      if(!cities[i]._pos||!cities[j]._pos)continue;
+      lG.append('line').attr('class','conn-line show')
+        .attr('x1',cities[i]._pos[0]).attr('y1',cities[i]._pos[1])
+        .attr('x2',cities[j]._pos[0]).attr('y2',cities[j]._pos[1])
+        .attr('stroke',color).attr('data-company',comp);
+    }
+  });
+
+  arr.forEach(c=>{
+    if(!c._pos)return;
+    const r=2+Math.sqrt(c.people.length/mx)*7;
+    const topInd=mode(c.people.map(p=>p.industry));
+    const color=IC[topInd]||IC.Other;
+    const nd=nG.append('g').style('cursor','pointer').attr('transform',`translate(${c._pos[0]},${c._pos[1]})`);
+    nd.append('circle').attr('r',r*1.8).attr('fill',color).attr('opacity',.04);
+    nd.append('circle').attr('r',r).attr('fill',color).attr('opacity',.75).attr('stroke',color).attr('stroke-width',1).attr('stroke-opacity',.3).attr('class','main-circle');
+    nd.append('circle').attr('r',Math.max(r*.3,1.5)).attr('fill','#fff').attr('opacity',.9);
+    if(c.people.length>1)nd.append('text').text(c.people.length).attr('class','node-label').attr('text-anchor','middle').attr('dy',-r-4).attr('fill',color).attr('font-size','9px');
+
+    nd.on('mouseover',function(ev){
+      d3.select(this).select('.main-circle').transition().duration(120).attr('opacity',1).attr('r',r+1);
+      const comps=new Set(c.people.map(p=>p.company));
+      lG.selectAll('.conn-line').each(function(){if(comps.has(d3.select(this).attr('data-company')))d3.select(this).classed('hl',true)});
+      showTip(ev,c);
+    }).on('mouseout',function(){
+      d3.select(this).select('.main-circle').transition().duration(120).attr('opacity',.75).attr('r',r);
+      lG.selectAll('.conn-line').classed('hl',false);
+      document.getElementById('tip').style.display='none';
+    }).on('click',()=>showDetail(c));
+  });
+}
+
+function mode(arr){const c={};arr.forEach(v=>c[v]=(c[v]||0)+1);return Object.entries(c).sort((a,b)=>b[1]-a[1])[0]?.[0]||'Other'}
+
+function showTip(ev,c){
+  const t=document.getElementById('tip');
+  const comps=[...new Set(c.people.map(p=>p.company))];
+  t.innerHTML=`<div class="tip-city">${c.city||'Unknown'}, ${c.state||''}</div>
+    <div class="tip-info"><b>${c.people.length}</b> connections · <b>${comps.length}</b> companies</div>
+    <div class="tip-comps">${comps.slice(0,3).join(' · ')}${comps.length>3?' …':''}</div>`;
+  t.style.display='block';
+  t.style.left=(ev.clientX+16)+'px';t.style.top=(ev.clientY-10)+'px';
+  const r=t.getBoundingClientRect();
+  if(r.right>innerWidth)t.style.left=(ev.clientX-r.width-16)+'px';
+  if(r.bottom>innerHeight)t.style.top=(ev.clientY-r.height-10)+'px';
+}
+
+function showDetail(c){
+  sel=c;const card=document.getElementById('detailCard');
+  const comps=[...new Set(c.people.map(p=>p.company))];
+  const industries=[...new Set(c.people.map(p=>p.industry))];
+  card.innerHTML=`<div class="detail-inner">
+    <button class="d-close" onclick="hideDetail()">×</button>
+    <div class="d-city">${c.city||'Unknown'}, ${c.state||''}</div>
+    <div class="d-sub">${comps.length} companies · ${industries.length} industries</div>
+    <div class="d-stats"><div class="d-stat"><div class="v">${c.people.length}</div><div class="l">People</div></div><div class="d-stat"><div class="v">${comps.length}</div><div class="l">Companies</div></div></div>
+    <div class="d-label">Connections</div>
+    ${c.people.slice(0,8).map(p=>{const color=IC[p.industry]||IC.Other;return`<div class="d-person"><div class="d-name">${p.url?`<a href="${p.url}" target="_blank" style="color:inherit;text-decoration:none;border-bottom:1px solid var(--t4)">${p.firstName} ${p.lastName}</a>`:p.firstName+' '+p.lastName}</div><div class="d-comp" style="color:${color}">${p.company}</div><div class="d-pos">${p.position}${p.school?' · '+p.school:''}</div></div>`}).join('')}
+    ${c.people.length>8?`<div class="d-more">+${c.people.length-8} more connections</div>`:''}</div>`;
+  card.classList.remove('hidden');
+}
+function hideDetail(){document.getElementById('detailCard').classList.add('hidden');sel=null}
+
+// ════════════════════════════════════════════════════════════
+// FILTERS
+// ════════════════════════════════════════════════════════════
+const FIELDS=[{k:'industry',l:'Industry'},{k:'company',l:'Company'},{k:'position',l:'Position'},{k:'state',l:'State'},{k:'school',l:'School'},{k:'gender',l:'Gender'}];
+
+function toggleFilters(){filtersOpen=!filtersOpen;document.getElementById('filterPanel').classList.toggle('hidden',!filtersOpen);document.getElementById('zoomCtrl').classList.toggle('shift',filtersOpen)}
+
+function renderFilters(){
+  let h='';
+  FIELDS.forEach(f=>{
+    const ct={};allData.forEach(d=>{const v=d[f.k];if(v)ct[v]=(ct[v]||0)+1});
+    const sorted=Object.entries(ct).sort((a,b)=>b[1]-a[1]);const mx=sorted.length?sorted[0][1]:1;
+    h+=`<div class="f-sec"><div class="f-head"><span class="f-title">${f.l}</span><span class="f-cnt">${sorted.length}</span></div>
+      <input class="f-search" placeholder="Search ${f.l.toLowerCase()}…" oninput="searchF('${f.k}',this.value)">
+      <div id="fl-${f.k}">${sorted.slice(0,8).map(([v,c])=>fItemHTML(f.k,v,c,mx)).join('')}</div></div>`;
+  });
+  h+=`<div class="f-sec"><button class="f-clear" onclick="clearAll()">Clear All Filters</button></div>`;
+  document.getElementById('filterContent').innerHTML=h;
+}
+
+function fItemHTML(k,v,c,mx){
+  const on=flt[k].has(v)?'on':'';const color=k==='industry'?(IC[v]||IC.Other):'#6b7280';
+  const escaped=v.replace(/'/g,"\\'").replace(/`/g,"'");
+  return`<div class="f-item ${on}" onclick="toggle('${k}','${escaped}')">
+    <span class="dot" style="background:${color}"></span>
+    <span class="lb">${v}</span>
+    <span class="bar"><span class="bf" style="width:${(c/mx*100)|0}%;background:${color}"></span></span>
+    <span class="ct">${c}</span></div>`;
+}
+
+function searchF(k,q){
+  q=q.toLowerCase();const ct={};allData.forEach(d=>{const v=d[k];if(v)ct[v]=(ct[v]||0)+1});
+  let s=Object.entries(ct).sort((a,b)=>b[1]-a[1]);if(q)s=s.filter(([v])=>v.toLowerCase().includes(q));
+  const mx=s.length?s[0][1]:1;
+  document.getElementById(`fl-${k}`).innerHTML=s.slice(0,10).map(([v,c])=>fItemHTML(k,v,c,mx)).join('');
+}
+
+function toggle(k,v){flt[k].has(v)?flt[k].delete(v):flt[k].add(v);apply()}
+function clearAll(){Object.keys(flt).forEach(k=>flt[k].clear());apply()}
+
+function apply(){
+  fData=allData.filter(d=>{for(const k of Object.keys(flt))if(flt[k].size&&!flt[k].has(d[k]))return false;return true});
+  document.getElementById('hf').textContent=[...Object.values(flt)].reduce((s,x)=>s+x.size,0);
+  renderFilters();renderNodes();renderLegend();
+}
+
+function renderLegend(){
+  const inds=[...new Set(fData.map(d=>d.industry))].sort();
+  document.getElementById('legend').innerHTML=inds.map(ind=>
+    `<div class="leg-item" onclick="toggle('industry','${ind}')"><span class="leg-dot" style="background:${IC[ind]||IC.Other}"></span>${ind}</div>`
+  ).join('');
+}
+
+// ════════════════════════════════════════════════════════════
+// SMART CSV COLUMN DETECTION
+// ════════════════════════════════════════════════════════════
+function findCol(headers, patterns){
+  for(const p of patterns){
+    const match=headers.find(h=>h.toLowerCase().replace(/[^a-z0-9]/g,'').includes(p.toLowerCase().replace(/[^a-z0-9]/g,'')));
+    if(match)return match;
+  }
+  return null;
+}
+
+function getCoords(city,state){
+  // Try exact city,state match
+  if(city&&state){
+    const key=(city+','+state).toLowerCase().trim();
+    if(CITIES[key])return[CITIES[key][0]+(Math.random()-.5)*.2, CITIES[key][1]+(Math.random()-.5)*.2];
+  }
+  // Try city only
+  if(city){
+    const cl=city.toLowerCase().trim();
+    for(const[k,v]of Object.entries(CITIES)){
+      if(k.split(',')[0].trim()===cl)return[v[0]+(Math.random()-.5)*.2, v[1]+(Math.random()-.5)*.2];
+    }
+  }
+  // Try state fallback
+  if(state){
+    const sl=state.toLowerCase().trim();
+    if(STATE_COORDS[sl])return[STATE_COORDS[sl][0]+(Math.random()-.5)*2, STATE_COORDS[sl][1]+(Math.random()-.5)*2];
+  }
+  // Random US location
+  const keys=Object.keys(CITIES);const k=rnd(keys);
+  return[CITIES[k][0]+(Math.random()-.5)*3, CITIES[k][1]+(Math.random()-.5)*3];
+}
+
+// ════════════════════════════════════════════════════════════
+// CSV PARSING
+// ════════════════════════════════════════════════════════════
+let pendingData=null;
+
+function parseLinkedInDate(str){
+  if(!str)return'';
+  // Handle "28 Apr 2026" format
+  const m={jan:'01',feb:'02',mar:'03',apr:'04',may:'05',jun:'06',jul:'07',aug:'08',sep:'09',oct:'10',nov:'11',dec:'12'};
+  const parts=str.trim().split(/\s+/);
+  if(parts.length===3){
+    const mon=m[parts[1].toLowerCase().substring(0,3)];
+    if(mon)return`${parts[2]}-${mon}-${parts[0].padStart(2,'0')}`;
+  }
+  // Already ISO or other format
+  return str;
+}
+
+// Company HQ locations for LinkedIn data that has no city/state
+const COMPANY_HQ={
+  "deloitte":["New York","NY"],"ey":["New York","NY"],"pwc":["New York","NY"],"kpmg":["New York","NY"],
+  "bdo":["Chicago","IL"],"rsm":["Chicago","IL"],"grant thornton":["Chicago","IL"],
+  "goldman sachs":["New York","NY"],"jp morgan":["New York","NY"],"morgan stanley":["New York","NY"],
+  "google":["San Francisco","CA"],"microsoft":["Seattle","WA"],"amazon":["Seattle","WA"],
+  "meta":["San Francisco","CA"],"apple":["San Francisco","CA"],"tesla":["Austin","TX"],
+  "palantir":["Denver","CO"],"stripe":["San Francisco","CA"],"coinbase":["San Francisco","CA"],
+  "citadel":["Chicago","IL"],"two sigma":["New York","NY"],"bridgewater":["Hartford","CT"],
+  "blackstone":["New York","NY"],"blackrock":["New York","NY"],"kkr":["New York","NY"],
+  "mckinsey":["New York","NY"],"bcg":["Boston","MA"],"bain":["Boston","MA"],
+  "raymond james":["Tampa","FL"],"edward jones":["St. Louis","MO"],"charles schwab":["Scottsdale","AZ"],
+  "fidelity":["Boston","MA"],"vanguard":["Philadelphia","PA"],
+  "wells fargo":["Charlotte","NC"],"bank of america":["Charlotte","NC"],"citi":["New York","NY"],
+  "usaa":["San Antonio","TX"],"lockheed martin":["Washington","DC"],
+  "baylor":["Waco","TX"],"walmart":["Dallas","TX"],"dell":["Austin","TX"],
+  "at&t":["Dallas","TX"],"exxon":["Houston","TX"],"chevron":["Houston","TX"],
+  "nike":["Portland","OR"],"intel":["Portland","OR"],"netflix":["Los Angeles","CA"],
+  "salesforce":["San Francisco","CA"],"oracle":["Austin","TX"],"ibm":["New York","NY"],
+  "accenture":["Chicago","IL"],"capital one":["Richmond","VA"],"truist":["Charlotte","NC"],
+  "disney":["Los Angeles","CA"],"walt disney":["Los Angeles","CA"],
+  "boeing":["Chicago","IL"],"raytheon":["Washington","DC"],"northrop":["Washington","DC"],
+  "nvidia":["San Francisco","CA"],"uber":["San Francisco","CA"],"airbnb":["San Francisco","CA"],
+  "spotify":["New York","NY"],"adobe":["San Francisco","CA"],
+  "chase":["New York","NY"],"jpmorgan":["New York","NY"]
+};
+
+function inferCityState(company){
+  if(!company)return['',''];
+  const cl=company.toLowerCase();
+  for(const[key,val]of Object.entries(COMPANY_HQ)){
+    if(cl.includes(key))return val;
+  }
+  return['',''];
+}
+
+function parseCSV(file){
+  showToast('Processing…',`Reading ${file.name}`,false);
+
+  // Read file as text first to strip LinkedIn's junk header
+  const reader=new FileReader();
+  reader.onerror=()=>showToast('Upload Failed','Could not read file.',true);
+  reader.onload=function(){
+    let text=reader.result;
+
+    // Strip LinkedIn's junk header lines: find the first line that looks like a CSV header
+    const lines=text.split('\n');
+    let headerIdx=-1;
+    for(let i=0;i<Math.min(lines.length,10);i++){
+      const line=lines[i].trim();
+      // A real CSV header has commas and starts with a known column name
+      if(line.match(/First Name|Last Name|Company|Position|Email/i)&&line.includes(',')){
+        headerIdx=i;break;
+      }
+    }
+    if(headerIdx>0){
+      console.log(`Stripped ${headerIdx} junk header lines from LinkedIn export`);
+      text=lines.slice(headerIdx).join('\n');
+    }
+
+    // Now parse the cleaned CSV
+    Papa.parse(text,{
+      header:true,
+      skipEmptyLines:true,
+      transformHeader:h=>h.trim(),
+      error:function(err){
+        showToast('Upload Failed','Could not parse CSV: '+err.message,true);
+      },
+      complete:function(res){
+        if(!res.data||res.data.length===0){
+          showToast('Upload Failed','No data rows found in file.',true);
+          return;
+        }
+
+        const headers=res.meta.fields||[];
+        console.log('CSV columns found:',headers);
+        console.log('Sample row:',res.data[0]);
+
+        // Smart column detection
+        const colFirst=findCol(headers,['First Name','firstname','first_name','first','given name']);
+        const colLast=findCol(headers,['Last Name','lastname','last_name','last','surname','family name']);
+        const colCompany=findCol(headers,['Company','company','organization','employer','firm']);
+        const colPosition=findCol(headers,['Position','position','title','job title','role','job_title']);
+        const colCity=findCol(headers,['City','city','location','metro']);
+        const colState=findCol(headers,['State','state','region','province']);
+        const colSchool=findCol(headers,['School','school','education','university','college']);
+        const colDate=findCol(headers,['Connected On','connected_on','connectedon','date','connected','date_connected']);
+        const colGender=findCol(headers,['Gender','gender','sex']);
+        const colIndustry=findCol(headers,['Industry','industry','sector']);
+        const colURL=findCol(headers,['URL','url','profile','linkedin','profile url']);
+
+        console.log('Mapped:',{colFirst,colLast,colCompany,colPosition,colCity,colState,colDate,colURL});
+
+        const parsed=[];
+        let skipped=0;
+
+        res.data.forEach(r=>{
+          const firstName=(r[colFirst]||'').trim();
+          const lastName=(r[colLast]||'').trim();
+          if(!firstName&&!lastName){skipped++;return}
+
+          const company=(r[colCompany]||'').trim();
+          const position=(r[colPosition]||'').trim();
+          let city=(r[colCity]||'').trim();
+          let state=(r[colState]||'').trim();
+          const school=(r[colSchool]||'').trim();
+          const connectedOn=parseLinkedInDate(r[colDate]||'');
+          const gender=(r[colGender]||'').trim();
+          const industry=(r[colIndustry]||'').trim()||infInd(company);
+          const url=(r[colURL]||'').trim();
+
+          // If no city/state, try to infer from company name
+          if(!city&&!state&&company){
+            const[iCity,iState]=inferCityState(company);
+            city=iCity;state=iState;
+          }
+
+          const[lat,lng]=getCoords(city,state);
+
+          parsed.push({firstName,lastName,company:company||'Unknown',position,city,state,school,connectedOn,industry,gender,lat,lng,url});
+        });
+
+      if(parsed.length===0){
+        showToast('Upload Failed',`No valid rows found. Columns detected: ${headers.slice(0,5).join(', ')}${headers.length>5?'…':''}`,true);
+        return;
+      }
+
+      // Show preview in modal
+      pendingData=parsed;
+      showPreview(parsed,headers,file.name,skipped);
+      }
+    });
+  };
+  reader.readAsText(file);
+}
+
+function showPreview(data,headers,filename,skipped){
+  const companies=[...new Set(data.map(d=>d.company).filter(Boolean))].length;
+  const withCity=data.filter(d=>d.city).length;
+  const sample=data.slice(0,5);
+
+  document.getElementById('modalContent').innerHTML=`
+    <h2>Import Preview</h2>
+    <p style="color:var(--c-tech);font-weight:500">${filename} — ${data.length} connections found</p>
+    <div class="preview-stats">
+      <span><b>${data.length}</b> people</span>
+      <span><b>${companies}</b> companies</span>
+      <span><b>${withCity}</b> with location</span>
+      ${skipped?`<span style="color:#cf7058">${skipped} skipped</span>`:''}
+    </div>
+    <div class="preview">
+      <h3>Sample Data</h3>
+      <table class="preview-table">
+        <tr><th>Name</th><th>Company</th><th>Position</th><th>Location</th></tr>
+        ${sample.map(d=>`<tr>
+          <td style="color:var(--t1)">${d.firstName} ${d.lastName}</td>
+          <td>${d.company}</td>
+          <td>${d.position||'—'}</td>
+          <td>${d.city?d.city+(d.state?', '+d.state:''):'<span style="color:var(--t4)">scattered</span>'}</td>
+        </tr>`).join('')}
+      </table>
+    </div>
+    <div class="preview-actions">
+      <button class="mbtn primary" onclick="confirmImport()">Load ${data.length} Connections</button>
+      <button class="mbtn" onclick="resetModal()">Cancel</button>
+    </div>
+    <div class="mhint" style="margin-top:14px">
+      Columns detected: ${headers.join(', ')}<br>
+      ${withCity<data.length?`${data.length-withCity} connections placed by company HQ or scattered randomly — LinkedIn doesn't export location.`:'All connections have location data.'}
+    </div>`;
+}
+
+function confirmImport(){
+  if(!pendingData)return;
+  allData=pendingData;
+  fData=[...allData];
+  Object.keys(flt).forEach(k=>flt[k].clear());
+  upH();renderFilters();renderNodes();renderLegend();
+  hideModal();
+  showToast('Import Complete',`<b>${allData.length}</b> connections loaded · <b>${[...new Set(allData.map(d=>d.company))].length}</b> companies · <b>${[...new Set(allData.map(d=>d.state).filter(Boolean))].length}</b> states`,false);
+  pendingData=null;
+}
+
+function resetModal(){
+  pendingData=null;
+  document.getElementById('modalContent').innerHTML=`
+    <h2>Import Network</h2>
+    <p>Upload your LinkedIn connections CSV or any network dataset.</p>
+    <div class="upload-zone" id="uploadZone">
+      <div class="uz-icon">↑</div>
+      <div class="uz-main">Drag &amp; drop CSV here, or click to browse</div>
+      <div class="uz-sub">LinkedIn export, custom CSV, any format</div>
+    </div>
+    <input type="file" id="fileIn" accept=".csv,.txt" style="display:none">
+    <button class="mcancel" onclick="hideModal()">cancel</button>
+    <div class="mhint">
+      Auto-detects columns. Works with LinkedIn export<br>
+      (First Name, Last Name, Company, Position, Connected On)<br>
+      and custom CSVs with City/State/School/Industry fields.
+    </div>`;
+  setupUploadZone();
+}
+
+// ════════════════════════════════════════════════════════════
+// UPLOAD HANDLERS
+// ════════════════════════════════════════════════════════════
+function setupUploadZone(){
+  const zone=document.getElementById('uploadZone');
+  const fileIn=document.getElementById('fileIn');
+  if(!zone||!fileIn)return;
+
+  zone.onclick=()=>fileIn.click();
+  zone.addEventListener('dragover',e=>{e.preventDefault();e.stopPropagation();zone.classList.add('dragover')});
+  zone.addEventListener('dragleave',e=>{e.preventDefault();e.stopPropagation();zone.classList.remove('dragover')});
+  zone.addEventListener('drop',e=>{e.preventDefault();e.stopPropagation();zone.classList.remove('dragover');if(e.dataTransfer.files.length)parseCSV(e.dataTransfer.files[0])});
+  fileIn.onchange=e=>{if(e.target.files.length)parseCSV(e.target.files[0])};
+}
+
+// Also allow drag onto the modal background
+const modalBg=document.getElementById('modalBg');
+modalBg.addEventListener('dragover',e=>{e.preventDefault()});
+modalBg.addEventListener('drop',e=>{e.preventDefault();if(e.dataTransfer.files.length)parseCSV(e.dataTransfer.files[0])});
+
+function showModal(){
+  resetModal();
+  document.getElementById('modalBg').classList.add('show');
+}
+function hideModal(){document.getElementById('modalBg').classList.remove('show');pendingData=null}
+function handleFile(e){if(e.target.files.length)parseCSV(e.target.files[0])}
+
+// ════════════════════════════════════════════════════════════
+// DATA LOADING
+// ════════════════════════════════════════════════════════════
+function loadDemo(){allData=genDemo();fData=[...allData];upH();renderFilters();renderNodes();renderLegend();showToast('Demo Loaded',`<b>130</b> sample connections generated`,false)}
+function upH(){
+  document.getElementById('hn').textContent=allData.length;
+  document.getElementById('hc').textContent=[...new Set(allData.map(d=>d.company))].length;
+  document.getElementById('hs').textContent=[...new Set(allData.map(d=>d.state).filter(Boolean))].length;
+  document.getElementById('hf').textContent='0';
+}
+
+function infInd(c){if(!c)return'Other';c=c.toLowerCase();
+  if(['deloitte','ey','ernst','pwc','kpmg'].some(x=>c.includes(x)))return'Big 4';
+  if(['bdo','rsm','grant thornton'].some(x=>c.includes(x)))return'Accounting';
+  if(['goldman','morgan stanley','jp morgan','jpmorgan'].some(x=>c.includes(x)))return'Banking';
+  if(['blackrock','vanguard','fidelity','state street'].some(x=>c.includes(x)))return'Asset Mgmt';
+  if(['blackstone','kkr','carlyle','bain capital','apollo','tpg'].some(x=>c.includes(x)))return'Private Equity';
+  if(['mckinsey','bcg','bain &','accenture'].some(x=>c.includes(x)))return'Consulting';
+  if(['google','microsoft','amazon','meta','apple','tesla','palantir','stripe','nvidia','salesforce','oracle','adobe'].some(x=>c.includes(x)))return'Technology';
+  if(['citadel','two sigma','point72','bridgewater','millennium','de shaw'].some(x=>c.includes(x)))return'Hedge Fund';
+  if(['raymond james','edward jones','schwab','merrill','ameriprise'].some(x=>c.includes(x)))return'Wealth Mgmt';
+  if(['wells fargo','bank of america','citi','chase','usaa','capital one','truist'].some(x=>c.includes(x)))return'Banking';
+  if(['lockheed','raytheon','northrop','boeing','general dynamics','l3harris'].some(x=>c.includes(x)))return'Defense';
+  return'Other';
+}
+
+// ════════════════════════════════════════════════════════════
+// INIT
+// ════════════════════════════════════════════════════════════
+async function init(){await initMap();loadDemo();setupUploadZone()}
+init();
+</script>
+</body>
+</html>
