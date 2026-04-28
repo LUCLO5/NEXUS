@@ -1,0 +1,513 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Nexus</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/d3/7.8.5/d3.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/topojson/3.0.2/topojson.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600;700&family=DM+Mono:wght@300;400;500&display=swap" rel="stylesheet">
+<style>
+*,*::before,*::after{margin:0;padding:0;box-sizing:border-box}
+:root{
+  --bg:#0c0f14;--map:#141920;--map-stroke:#232b38;--map-hover:#1c2430;
+  --panel:rgba(14,17,23,.82);--panel-border:rgba(255,255,255,.08);--panel-border-h:rgba(255,255,255,.15);
+  --t1:#e8eaed;--t2:#9aa0ac;--t3:#5c6370;--t4:#353b47;
+  --accent:#fff;
+  --c-big4:#6b8cce;--c-acct:#7fa0c4;--c-bank:#d4a847;--c-asset:#a78bcc;
+  --c-pe:#c47a9b;--c-consult:#5fb896;--c-tech:#5cc4c4;--c-hedge:#cf7058;
+  --c-wealth:#d49a5a;--c-defense:#7a8899;--c-other:#6b7280;
+}
+html,body{height:100%;overflow:hidden;background:var(--bg);color:var(--t1);font-family:'DM Sans',system-ui,sans-serif}
+
+/* ── FULL SCREEN MAP ── */
+#map{position:fixed;inset:0;z-index:1}
+#map svg{width:100%;height:100%;display:block}
+.state{fill:var(--map);stroke:var(--map-stroke);stroke-width:.5;transition:fill .15s}
+.state:hover{fill:var(--map-hover)}
+.conn-line{stroke-width:.4;opacity:0;transition:opacity .3s}
+.conn-line.show{opacity:.25}
+.conn-line.hl{opacity:.7;stroke-width:1}
+
+/* ── FLOATING PANELS ── */
+.glass{background:var(--panel);border:1px solid var(--panel-border);backdrop-filter:blur(20px);-webkit-backdrop-filter:blur(20px)}
+
+/* TOP BAR */
+.topbar{position:fixed;top:16px;left:16px;right:16px;z-index:10;display:flex;align-items:center;justify-content:space-between;padding:10px 20px;border-radius:10px;gap:16px}
+.brand{display:flex;align-items:center;gap:10px}
+.brand h1{font-size:17px;font-weight:600;letter-spacing:3px;text-transform:uppercase}
+.brand .dot{width:6px;height:6px;border-radius:50%;background:var(--c-tech);flex-shrink:0}
+.stats{display:flex;gap:20px;font-size:12px;color:var(--t2)}
+.stats b{color:var(--t1);font-weight:500;margin-left:3px}
+.top-actions{display:flex;gap:8px}
+.tbtn{background:rgba(255,255,255,.06);border:1px solid var(--panel-border);color:var(--t2);padding:6px 14px;font:12px 'DM Sans',sans-serif;font-weight:500;border-radius:6px;cursor:pointer;transition:all .2s;display:flex;align-items:center;gap:6px}
+.tbtn:hover{background:rgba(255,255,255,.1);color:var(--t1);border-color:var(--panel-border-h)}
+.tbtn svg{width:14px;height:14px;stroke:currentColor;fill:none;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+
+/* FILTER PANEL */
+.filters{position:fixed;top:72px;left:16px;bottom:60px;width:260px;z-index:10;border-radius:10px;overflow:hidden;display:flex;flex-direction:column;transition:transform .3s ease,opacity .3s ease}
+.filters.hidden{transform:translateX(-280px);opacity:0;pointer-events:none}
+.filters-scroll{flex:1;overflow-y:auto;padding:0}
+.filters-scroll::-webkit-scrollbar{width:3px}
+.filters-scroll::-webkit-scrollbar-thumb{background:var(--t4);border-radius:2px}
+.f-sec{border-bottom:1px solid var(--panel-border);padding:14px 16px}
+.f-head{display:flex;justify-content:space-between;align-items:center;margin-bottom:8px}
+.f-title{font-size:10px;font-weight:600;letter-spacing:1.5px;text-transform:uppercase;color:var(--t3)}
+.f-cnt{font-size:10px;color:var(--t4);font-family:'DM Mono',monospace}
+.f-search{width:100%;background:rgba(255,255,255,.04);border:1px solid var(--panel-border);color:var(--t1);padding:5px 10px;font:11.5px 'DM Sans',sans-serif;border-radius:5px;outline:none;margin-bottom:6px;transition:border .2s}
+.f-search:focus{border-color:var(--panel-border-h)}
+.f-search::placeholder{color:var(--t4)}
+.f-item{display:flex;align-items:center;gap:6px;padding:3px 0;cursor:pointer;font-size:12px;color:var(--t3);transition:color .12s}
+.f-item:hover{color:var(--t1)}
+.f-item.on{color:var(--t1)}
+.f-item .dot{width:5px;height:5px;border-radius:50%;flex-shrink:0;opacity:.5}
+.f-item.on .dot{opacity:1}
+.f-item .lb{flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.f-item .bar{width:40px;height:2px;background:rgba(255,255,255,.06);border-radius:1px;overflow:hidden;flex-shrink:0}
+.f-item .bf{height:100%;border-radius:1px;transition:width .3s}
+.f-item .ct{font-family:'DM Mono',monospace;font-size:10px;color:var(--t4);min-width:18px;text-align:right}
+.f-item.on .ct{color:var(--t2)}
+.f-clear{width:100%;background:none;border:1px solid var(--panel-border);color:var(--t3);padding:7px;font:11px 'DM Sans',sans-serif;font-weight:500;border-radius:6px;cursor:pointer;transition:all .2s;letter-spacing:1px;text-transform:uppercase}
+.f-clear:hover{border-color:var(--panel-border-h);color:var(--t1)}
+
+/* DETAIL CARD */
+.detail{position:fixed;top:72px;right:16px;width:280px;z-index:10;border-radius:10px;overflow:hidden;transition:transform .3s ease,opacity .3s ease}
+.detail.hidden{transform:translateX(300px);opacity:0;pointer-events:none}
+.detail-inner{padding:18px}
+.d-close{position:absolute;top:12px;right:14px;background:none;border:none;color:var(--t3);font-size:18px;cursor:pointer;line-height:1}
+.d-close:hover{color:var(--t1)}
+.d-city{font-size:20px;font-weight:500;margin-bottom:2px;letter-spacing:.5px}
+.d-sub{font-size:12px;color:var(--t3);margin-bottom:14px}
+.d-stats{display:grid;grid-template-columns:1fr 1fr;gap:1px;background:var(--panel-border);border-radius:6px;overflow:hidden;margin-bottom:14px}
+.d-stat{background:rgba(255,255,255,.03);padding:10px;text-align:center}
+.d-stat .v{font-size:20px;font-weight:500;font-family:'DM Mono',monospace}
+.d-stat .l{font-size:9px;letter-spacing:1.5px;text-transform:uppercase;color:var(--t3);margin-top:2px}
+.d-label{font-size:10px;font-weight:600;letter-spacing:1.5px;text-transform:uppercase;color:var(--t3);margin-bottom:8px}
+.d-person{padding:8px 0;border-bottom:1px solid var(--panel-border)}
+.d-person:last-child{border:none}
+.d-name{font-size:13px;font-weight:500}
+.d-pos{font-size:11px;color:var(--t3);margin-top:1px}
+.d-comp{font-size:11px;color:var(--t2)}
+.d-more{font-size:11px;color:var(--t3);padding-top:8px}
+
+/* TOOLTIP */
+.tip{position:fixed;z-index:100;padding:12px 16px;border-radius:8px;pointer-events:none;display:none;max-width:260px;line-height:1.5}
+.tip .tip-city{font-size:15px;font-weight:500;margin-bottom:3px}
+.tip .tip-info{font-size:11.5px;color:var(--t2)}
+.tip .tip-info b{color:var(--t1);font-weight:500}
+.tip .tip-comps{font-size:11px;color:var(--t3);margin-top:4px}
+
+/* LEGEND */
+.legend{position:fixed;bottom:16px;right:16px;z-index:10;padding:12px 16px;border-radius:8px;display:flex;flex-wrap:wrap;gap:10px;max-width:500px}
+.leg-item{display:flex;align-items:center;gap:5px;font-size:10px;color:var(--t3);white-space:nowrap;cursor:pointer;transition:color .15s}
+.leg-item:hover{color:var(--t1)}
+.leg-dot{width:7px;height:7px;border-radius:50%}
+
+/* ZOOM CONTROLS */
+.zoom-ctrl{position:fixed;bottom:16px;left:16px;z-index:10;display:flex;flex-direction:column;border-radius:8px;overflow:hidden}
+.zoom-ctrl.shift{left:284px}
+.z-btn{width:36px;height:36px;background:var(--panel);border:none;border-bottom:1px solid var(--panel-border);color:var(--t2);font-size:18px;cursor:pointer;display:flex;align-items:center;justify-content:center;transition:all .15s}
+.z-btn:last-child{border-bottom:none}
+.z-btn:hover{background:rgba(255,255,255,.08);color:var(--t1)}
+
+/* UPLOAD MODAL */
+.modal-bg{position:fixed;inset:0;background:rgba(12,15,20,.9);display:none;align-items:center;justify-content:center;z-index:200;backdrop-filter:blur(8px)}
+.modal-bg.show{display:flex}
+.modal{background:var(--panel);border:1px solid var(--panel-border);padding:40px 48px;border-radius:12px;text-align:center;max-width:420px}
+.modal h2{font-size:18px;font-weight:500;letter-spacing:2px;margin-bottom:4px}
+.modal p{color:var(--t3);font-size:13px;margin-bottom:22px;line-height:1.6}
+.modal .mbtn{background:rgba(255,255,255,.08);border:1px solid var(--panel-border-h);color:var(--t1);padding:9px 28px;font:13px 'DM Sans',sans-serif;font-weight:500;border-radius:6px;cursor:pointer;transition:all .2s}
+.modal .mbtn:hover{background:rgba(255,255,255,.15)}
+.modal .mcancel{display:block;margin:14px auto 0;background:none;border:none;color:var(--t4);font:12px 'DM Sans',sans-serif;cursor:pointer}
+.modal .mcancel:hover{color:var(--t2)}
+.modal .mhint{margin-top:20px;font-size:11px;color:var(--t4);line-height:1.8;text-align:left;border-top:1px solid var(--panel-border);padding-top:14px;font-family:'DM Mono',monospace}
+.modal.dragover{border-color:var(--panel-border-h);background:rgba(20,25,32,.9)}
+
+/* CONNECTION COUNT LABEL */
+.node-label{font-family:'DM Mono',monospace;pointer-events:none;font-weight:500}
+
+@media(max-width:800px){
+  .filters{width:220px}
+  .stats{display:none}
+}
+</style>
+</head>
+<body>
+
+<!-- FULL SCREEN MAP -->
+<div id="map"></div>
+
+<!-- TOP BAR -->
+<div class="topbar glass">
+  <div class="brand"><div class="dot"></div><h1>Nexus</h1></div>
+  <div class="stats">
+    <span>Nodes <b id="hn">0</b></span>
+    <span>Companies <b id="hc">0</b></span>
+    <span>States <b id="hs">0</b></span>
+  </div>
+  <div class="top-actions">
+    <button class="tbtn" id="filterToggle" onclick="toggleFilters()">
+      <svg viewBox="0 0 24 24"><path d="M4 6h16M7 12h10M10 18h4"/></svg>
+      Filters <span id="hf" style="font-family:'DM Mono',monospace;color:var(--t3)">0</span>
+    </button>
+    <button class="tbtn" onclick="showModal()">
+      <svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>
+      Import
+    </button>
+    <button class="tbtn" onclick="loadDemo()">Demo</button>
+  </div>
+</div>
+
+<!-- FILTER PANEL -->
+<div class="filters glass hidden" id="filterPanel">
+  <div class="filters-scroll" id="filterContent"></div>
+</div>
+
+<!-- DETAIL CARD -->
+<div class="detail glass hidden" id="detailCard"></div>
+
+<!-- TOOLTIP -->
+<div class="tip glass" id="tip"></div>
+
+<!-- LEGEND -->
+<div class="legend glass" id="legend"></div>
+
+<!-- ZOOM CONTROLS -->
+<div class="zoom-ctrl glass" id="zoomCtrl">
+  <button class="z-btn" onclick="zoomIn()">+</button>
+  <button class="z-btn" onclick="zoomOut()">−</button>
+  <button class="z-btn" onclick="zoomReset()" style="font-size:12px">⟲</button>
+</div>
+
+<!-- UPLOAD MODAL -->
+<div class="modal-bg" id="modalBg">
+  <div class="modal glass" id="modalBox">
+    <h2>Import Network</h2>
+    <p>Upload your LinkedIn connections CSV or any network dataset.</p>
+    <button class="mbtn" onclick="document.getElementById('fileIn').click()">Select CSV File</button>
+    <input type="file" id="fileIn" accept=".csv" style="display:none" onchange="handleFile(event)">
+    <button class="mcancel" onclick="hideModal()">cancel</button>
+    <div class="mhint">Expected columns:<br>First Name, Last Name, Company,<br>Position, City, State, School,<br>Connected On</div>
+  </div>
+</div>
+
+<script>
+// ════════════════════════════════════════════════════════════
+// INDUSTRY COLORS
+// ════════════════════════════════════════════════════════════
+const IC={"Big 4":"#6b8cce","Accounting":"#7fa0c4","Banking":"#d4a847","Asset Mgmt":"#a78bcc","Private Equity":"#c47a9b","Consulting":"#5fb896","Technology":"#5cc4c4","Hedge Fund":"#cf7058","Wealth Mgmt":"#d49a5a","Defense":"#7a8899","Other":"#6b7280"};
+
+// ════════════════════════════════════════════════════════════
+// REFERENCE DATA
+// ════════════════════════════════════════════════════════════
+const CITIES={"New York,NY":[40.71,-74],"Los Angeles,CA":[34.05,-118.24],"Chicago,IL":[41.88,-87.63],"Houston,TX":[29.76,-95.37],"Phoenix,AZ":[33.45,-112.07],"Dallas,TX":[32.78,-96.8],"San Francisco,CA":[37.77,-122.42],"Austin,TX":[30.27,-97.74],"Denver,CO":[39.74,-105],"Seattle,WA":[47.61,-122.33],"Boston,MA":[42.36,-71.06],"Atlanta,GA":[33.75,-84.39],"Miami,FL":[25.76,-80.19],"Washington,DC":[38.91,-77.04],"Nashville,TN":[36.16,-86.78],"Charlotte,NC":[35.23,-80.84],"San Antonio,TX":[29.42,-98.49],"Minneapolis,MN":[44.98,-93.27],"Portland,OR":[45.52,-122.68],"Detroit,MI":[42.33,-83.05],"Philadelphia,PA":[39.95,-75.17],"San Diego,CA":[32.72,-117.16],"Waco,TX":[31.55,-97.15],"Scottsdale,AZ":[33.49,-111.93],"Salt Lake City,UT":[40.76,-111.89],"Raleigh,NC":[35.78,-78.64],"Tampa,FL":[27.95,-82.46],"Columbus,OH":[39.96,-83],"Indianapolis,IN":[39.77,-86.16],"Kansas City,MO":[39.1,-94.58],"Pittsburgh,PA":[40.44,-80],"St. Louis,MO":[38.63,-90.2],"Las Vegas,NV":[36.17,-115.14],"Cincinnati,OH":[39.1,-84.51],"Milwaukee,WI":[43.04,-87.91],"Oklahoma City,OK":[35.47,-97.52],"Richmond,VA":[37.54,-77.44],"Hartford,CT":[41.76,-72.68],"Jacksonville,FL":[30.33,-81.66],"Birmingham,AL":[33.52,-86.81],"Memphis,TN":[35.15,-90.05]};
+const COMPS=["Deloitte","EY","PwC","KPMG","BDO","RSM","Grant Thornton","Goldman Sachs","JP Morgan","Morgan Stanley","BlackRock","Blackstone","KKR","Bain Capital","McKinsey","BCG","Bain & Company","Google","Microsoft","Amazon","Meta","Apple","Tesla","Palantir","Stripe","Coinbase","Citadel","Two Sigma","Point72","Bridgewater","Raymond James","Edward Jones","Fidelity","Vanguard","Charles Schwab","Wells Fargo","Bank of America","Citi","USAA","Lockheed Martin"];
+const POS=["Analyst","Senior Analyst","Associate","Senior Associate","Consultant","Manager","Senior Manager","Director","VP","Partner","Intern","Staff Accountant","Senior Accountant","Audit Associate","Tax Associate","Investment Analyst","Portfolio Manager","Software Engineer","Product Manager","Data Scientist","Financial Advisor"];
+const SCHOOLS=["Baylor University","UT Austin","Texas A&M","SMU","TCU","Rice University","Harvard","Stanford","Wharton","NYU Stern","Columbia","MIT","Duke","Georgetown","Michigan","USC","UCLA","Chicago Booth","Northwestern","Vanderbilt","Emory","Arizona State","Georgia Tech","UNC","Virginia Tech","Boston College","Notre Dame","Florida","Ohio State"];
+const IND={"Deloitte":"Big 4","EY":"Big 4","PwC":"Big 4","KPMG":"Big 4","BDO":"Accounting","RSM":"Accounting","Grant Thornton":"Accounting","Goldman Sachs":"Banking","JP Morgan":"Banking","Morgan Stanley":"Banking","BlackRock":"Asset Mgmt","Blackstone":"Private Equity","KKR":"Private Equity","Bain Capital":"Private Equity","McKinsey":"Consulting","BCG":"Consulting","Bain & Company":"Consulting","Google":"Technology","Microsoft":"Technology","Amazon":"Technology","Meta":"Technology","Apple":"Technology","Tesla":"Technology","Palantir":"Technology","Stripe":"Technology","Coinbase":"Technology","Citadel":"Hedge Fund","Two Sigma":"Hedge Fund","Point72":"Hedge Fund","Bridgewater":"Hedge Fund","Raymond James":"Wealth Mgmt","Edward Jones":"Wealth Mgmt","Fidelity":"Asset Mgmt","Vanguard":"Asset Mgmt","Charles Schwab":"Wealth Mgmt","Wells Fargo":"Banking","Bank of America":"Banking","Citi":"Banking","USAA":"Banking","Lockheed Martin":"Defense"};
+const FM=["James","Alex","Michael","Ryan","David","Chris","Daniel","Andrew","Tyler","Josh","Brandon","Justin","Matt","Kevin","Marcus","Eric","Jordan","Ethan","Noah","Will","Luke","Caleb","Nathan","Ben","Trey","Cole","Grant","Chase"];
+const FF=["Sarah","Emily","Jessica","Lauren","Ashley","Amanda","Rachel","Megan","Hannah","Olivia","Emma","Sophia","Ava","Isabella","Maya","Taylor","Morgan","Kayla","Brooke","Nicole","Samantha","Victoria","Natalie","Grace","Lily","Claire","Allison","Madison"];
+const LN=["Chen","Patel","Williams","Johnson","Smith","Garcia","Martinez","Anderson","Thompson","Taylor","Wilson","Moore","Jackson","Lee","Kim","Nguyen","Davis","Miller","Brown","Jones","Rodriguez","Walker","Hall","Young","King","Wright","Lopez","Scott","Adams","Mitchell","Roberts","Carter","Phillips","Evans","Turner","Campbell"];
+const rnd=a=>a[Math.floor(Math.random()*a.length)];
+
+function genDemo(){
+  const d=[];const ck=Object.keys(CITIES);
+  for(let i=0;i<130;i++){
+    const f=Math.random()>.5;const company=rnd(COMPS);const ckey=rnd(ck);const[city,state]=ckey.split(',');
+    const dt=new Date(2022,0,1);dt.setDate(dt.getDate()+Math.floor(Math.random()*1580));
+    d.push({firstName:f?rnd(FF):rnd(FM),lastName:rnd(LN),company,position:rnd(POS),city:city.trim(),state:state.trim(),school:rnd(SCHOOLS),connectedOn:dt.toISOString().split('T')[0],industry:IND[company]||'Other',gender:f?'Female':'Male',lat:CITIES[ckey][0]+(Math.random()-.5)*.3,lng:CITIES[ckey][1]+(Math.random()-.5)*.3});
+  }
+  return d;
+}
+
+// ════════════════════════════════════════════════════════════
+// STATE
+// ════════════════════════════════════════════════════════════
+let allData=[],fData=[],sel=null,filtersOpen=false;
+let flt={industry:new Set(),company:new Set(),position:new Set(),state:new Set(),school:new Set(),gender:new Set()};
+let proj,svg,g,zoomBehavior;
+
+// ════════════════════════════════════════════════════════════
+// MAP INIT
+// ════════════════════════════════════════════════════════════
+async function initMap(){
+  const w=innerWidth,h=innerHeight;
+  svg=d3.select('#map').append('svg').attr('width',w).attr('height',h);
+  g=svg.append('g');
+  proj=d3.geoAlbersUsa().translate([w/2,h/2]).scale(Math.min(w,h)*1.4);
+  const path=d3.geoPath().projection(proj);
+
+  try{
+    const us=await d3.json('https://cdn.jsdelivr.net/npm/us-atlas@3/states-10m.json');
+    g.append('g').attr('id','statesG').selectAll('path')
+      .data(topojson.feature(us,us.objects.states).features)
+      .join('path').attr('d',path).attr('class','state');
+    g.append('path').datum(topojson.mesh(us,us.objects.states,(a,b)=>a!==b))
+      .attr('d',path).attr('fill','none').attr('stroke','var(--map-stroke)').attr('stroke-width',.5);
+  }catch(e){console.error(e)}
+
+  g.append('g').attr('id','linesG');
+  g.append('g').attr('id','nodesG');
+
+  zoomBehavior=d3.zoom().scaleExtent([.8,12])
+    .on('zoom',e=>g.attr('transform',e.transform));
+  svg.call(zoomBehavior);
+
+  window.addEventListener('resize',()=>{
+    svg.attr('width',innerWidth).attr('height',innerHeight);
+  });
+}
+
+function zoomIn(){svg.transition().duration(300).call(zoomBehavior.scaleBy,1.5)}
+function zoomOut(){svg.transition().duration(300).call(zoomBehavior.scaleBy,.67)}
+function zoomReset(){svg.transition().duration(500).call(zoomBehavior.transform,d3.zoomIdentity)}
+
+// ════════════════════════════════════════════════════════════
+// RENDER NODES
+// ════════════════════════════════════════════════════════════
+function renderNodes(){
+  const nG=g.select('#nodesG').html('');
+  const lG=g.select('#linesG').html('');
+
+  // group by approximate location
+  const grp={};
+  fData.forEach(d=>{
+    const rLat=Math.round(d.lat*10)/10;const rLng=Math.round(d.lng*10)/10;
+    const k=rLat+','+rLng;
+    if(!grp[k])grp[k]={lat:rLat,lng:rLng,city:d.city,state:d.state,people:[]};
+    grp[k].people.push(d);
+  });
+  const arr=Object.values(grp);
+  const mx=Math.max(...arr.map(c=>c.people.length),1);
+
+  // company connection lines
+  const cc={};
+  arr.forEach(c=>{const pos=proj([c.lng,c.lat]);if(!pos)return;c._pos=pos;
+    c.people.forEach(p=>{if(!cc[p.company])cc[p.company]=[];cc[p.company].push(c)})});
+  
+  Object.entries(cc).forEach(([comp,cities])=>{
+    if(cities.length<2)return;
+    const color=IC[IND[comp]]||IC.Other;
+    for(let i=0;i<cities.length;i++)for(let j=i+1;j<cities.length;j++){
+      if(!cities[i]._pos||!cities[j]._pos)continue;
+      lG.append('line').attr('class','conn-line show')
+        .attr('x1',cities[i]._pos[0]).attr('y1',cities[i]._pos[1])
+        .attr('x2',cities[j]._pos[0]).attr('y2',cities[j]._pos[1])
+        .attr('stroke',color).attr('data-company',comp);
+    }
+  });
+
+  // nodes
+  arr.forEach(c=>{
+    if(!c._pos)return;
+    const r=2+Math.sqrt(c.people.length/mx)*7;
+    const topInd=mode(c.people.map(p=>p.industry));
+    const color=IC[topInd]||IC.Other;
+
+    const nd=nG.append('g').style('cursor','pointer')
+      .attr('transform',`translate(${c._pos[0]},${c._pos[1]})`);
+
+    // subtle outer ring
+    nd.append('circle').attr('r',r*1.8).attr('fill',color).attr('opacity',.04);
+    // main circle
+    nd.append('circle').attr('r',r).attr('fill',color).attr('opacity',.75)
+      .attr('stroke',color).attr('stroke-width',1).attr('stroke-opacity',.3)
+      .attr('class','main-circle');
+    // bright center
+    nd.append('circle').attr('r',Math.max(r*.3,1.5)).attr('fill','#fff').attr('opacity',.9);
+
+    // count label
+    if(c.people.length>1){
+      nd.append('text').text(c.people.length)
+        .attr('class','node-label').attr('text-anchor','middle').attr('dy',-r-4)
+        .attr('fill',color).attr('font-size','9px');
+    }
+
+    nd.on('mouseover',function(ev){
+      d3.select(this).select('.main-circle').transition().duration(120).attr('opacity',1).attr('r',r+1);
+      // highlight company lines
+      const comps=new Set(c.people.map(p=>p.company));
+      lG.selectAll('.conn-line').each(function(){
+        if(comps.has(d3.select(this).attr('data-company')))d3.select(this).classed('hl',true);
+      });
+      showTip(ev,c);
+    }).on('mouseout',function(){
+      d3.select(this).select('.main-circle').transition().duration(120).attr('opacity',.75).attr('r',r);
+      lG.selectAll('.conn-line').classed('hl',false);
+      document.getElementById('tip').style.display='none';
+    }).on('click',()=>showDetail(c));
+  });
+}
+
+function mode(arr){const c={};arr.forEach(v=>c[v]=(c[v]||0)+1);return Object.entries(c).sort((a,b)=>b[1]-a[1])[0]?.[0]||'Other'}
+
+function showTip(ev,c){
+  const t=document.getElementById('tip');
+  const comps=[...new Set(c.people.map(p=>p.company))].slice(0,3);
+  t.innerHTML=`<div class="tip-city">${c.city}, ${c.state}</div>
+    <div class="tip-info"><b>${c.people.length}</b> connections · <b>${[...new Set(c.people.map(p=>p.company))].length}</b> companies</div>
+    <div class="tip-comps">${comps.join(' · ')}${comps.length<[...new Set(c.people.map(p=>p.company))].length?' …':''}</div>`;
+  t.style.display='block';
+  t.style.left=(ev.clientX+16)+'px';
+  t.style.top=(ev.clientY-10)+'px';
+  // keep in viewport
+  const r=t.getBoundingClientRect();
+  if(r.right>innerWidth)t.style.left=(ev.clientX-r.width-16)+'px';
+  if(r.bottom>innerHeight)t.style.top=(ev.clientY-r.height-10)+'px';
+}
+
+// ════════════════════════════════════════════════════════════
+// DETAIL CARD
+// ════════════════════════════════════════════════════════════
+function showDetail(c){
+  sel=c;
+  const card=document.getElementById('detailCard');
+  const comps=[...new Set(c.people.map(p=>p.company))];
+  const industries=[...new Set(c.people.map(p=>p.industry))];
+  
+  card.innerHTML=`<div class="detail-inner">
+    <button class="d-close" onclick="hideDetail()">×</button>
+    <div class="d-city">${c.city}, ${c.state}</div>
+    <div class="d-sub">${comps.length} companies · ${industries.length} industries</div>
+    <div class="d-stats">
+      <div class="d-stat"><div class="v">${c.people.length}</div><div class="l">People</div></div>
+      <div class="d-stat"><div class="v">${comps.length}</div><div class="l">Companies</div></div>
+    </div>
+    <div class="d-label">Connections</div>
+    ${c.people.slice(0,8).map(p=>{
+      const color=IC[p.industry]||IC.Other;
+      return`<div class="d-person">
+        <div class="d-name">${p.firstName} ${p.lastName}</div>
+        <div class="d-comp" style="color:${color}">${p.company}</div>
+        <div class="d-pos">${p.position} · ${p.school}</div>
+      </div>`;
+    }).join('')}
+    ${c.people.length>8?`<div class="d-more">+${c.people.length-8} more connections</div>`:''}
+  </div>`;
+  card.classList.remove('hidden');
+}
+
+function hideDetail(){document.getElementById('detailCard').classList.add('hidden');sel=null}
+
+// ════════════════════════════════════════════════════════════
+// FILTERS
+// ════════════════════════════════════════════════════════════
+const FIELDS=[{k:'industry',l:'Industry'},{k:'company',l:'Company'},{k:'position',l:'Position'},{k:'state',l:'State'},{k:'school',l:'School'},{k:'gender',l:'Gender'}];
+
+function toggleFilters(){
+  filtersOpen=!filtersOpen;
+  document.getElementById('filterPanel').classList.toggle('hidden',!filtersOpen);
+  document.getElementById('zoomCtrl').classList.toggle('shift',filtersOpen);
+}
+
+function renderFilters(){
+  let h='';
+  FIELDS.forEach(f=>{
+    const ct={};allData.forEach(d=>{if(d[f.k])ct[d[f.k]]=(ct[d[f.k]]||0)+1});
+    const sorted=Object.entries(ct).sort((a,b)=>b[1]-a[1]);const mx=sorted.length?sorted[0][1]:1;
+    h+=`<div class="f-sec"><div class="f-head"><span class="f-title">${f.l}</span><span class="f-cnt">${sorted.length}</span></div>
+      <input class="f-search" placeholder="Search ${f.l.toLowerCase()}…" oninput="searchF('${f.k}',this.value)">
+      <div id="fl-${f.k}">${sorted.slice(0,8).map(([v,c])=>fItemHTML(f.k,v,c,mx)).join('')}</div></div>`;
+  });
+  h+=`<div class="f-sec"><button class="f-clear" onclick="clearAll()">Clear All Filters</button></div>`;
+  document.getElementById('filterContent').innerHTML=h;
+}
+
+function fItemHTML(k,v,c,mx){
+  const on=flt[k].has(v)?'on':'';
+  const color=k==='industry'?(IC[v]||IC.Other):'#6b7280';
+  return`<div class="f-item ${on}" onclick="toggle('${k}',\`${v.replace(/`/g,"'")}\`)">
+    <span class="dot" style="background:${color}"></span>
+    <span class="lb">${v}</span>
+    <span class="bar"><span class="bf" style="width:${(c/mx*100)|0}%;background:${color}"></span></span>
+    <span class="ct">${c}</span></div>`;
+}
+
+function searchF(k,q){
+  q=q.toLowerCase();const ct={};allData.forEach(d=>{if(d[k])ct[d[k]]=(ct[d[k]]||0)+1});
+  let s=Object.entries(ct).sort((a,b)=>b[1]-a[1]);if(q)s=s.filter(([v])=>v.toLowerCase().includes(q));
+  const mx=s.length?s[0][1]:1;
+  document.getElementById(`fl-${k}`).innerHTML=s.slice(0,10).map(([v,c])=>fItemHTML(k,v,c,mx)).join('');
+}
+
+function toggle(k,v){flt[k].has(v)?flt[k].delete(v):flt[k].add(v);apply()}
+function clearAll(){Object.keys(flt).forEach(k=>flt[k].clear());apply()}
+
+function apply(){
+  fData=allData.filter(d=>{for(const k of Object.keys(flt))if(flt[k].size&&!flt[k].has(d[k]))return false;return true});
+  const tot=[...Object.values(flt)].reduce((s,x)=>s+x.size,0);
+  document.getElementById('hf').textContent=tot;
+  renderFilters();renderNodes();renderLegend();
+}
+
+// ════════════════════════════════════════════════════════════
+// LEGEND
+// ════════════════════════════════════════════════════════════
+function renderLegend(){
+  const inds=[...new Set(fData.map(d=>d.industry))].sort();
+  document.getElementById('legend').innerHTML=inds.map(ind=>
+    `<div class="leg-item" onclick="toggle('industry','${ind}')">
+      <span class="leg-dot" style="background:${IC[ind]||IC.Other}"></span>${ind}
+    </div>`
+  ).join('');
+}
+
+// ════════════════════════════════════════════════════════════
+// DATA LOADING
+// ════════════════════════════════════════════════════════════
+function loadDemo(){allData=genDemo();fData=[...allData];upH();renderFilters();renderNodes();renderLegend()}
+function upH(){
+  document.getElementById('hn').textContent=allData.length;
+  document.getElementById('hc').textContent=[...new Set(allData.map(d=>d.company))].length;
+  document.getElementById('hs').textContent=[...new Set(allData.map(d=>d.state))].length;
+  document.getElementById('hf').textContent='0';
+}
+
+function showModal(){document.getElementById('modalBg').classList.add('show')}
+function hideModal(){document.getElementById('modalBg').classList.remove('show')}
+const mdl=document.getElementById('modalBox');
+mdl.addEventListener('dragover',e=>{e.preventDefault();mdl.classList.add('dragover')});
+mdl.addEventListener('dragleave',()=>mdl.classList.remove('dragover'));
+mdl.addEventListener('drop',e=>{e.preventDefault();mdl.classList.remove('dragover');if(e.dataTransfer.files.length)parseCSV(e.dataTransfer.files[0])});
+function handleFile(e){if(e.target.files.length)parseCSV(e.target.files[0])}
+
+function parseCSV(file){
+  Papa.parse(file,{header:true,skipEmptyLines:true,complete:function(res){
+    allData=res.data.map(r=>{
+      const firstName=r['First Name']||r.firstName||'';const lastName=r['Last Name']||r.lastName||'';
+      const company=r.Company||r.company||'Unknown';const position=r.Position||r.position||r.Title||'';
+      const city=r.City||r.city||'';const state=r.State||r.state||'';
+      const school=r.School||r.school||r.Education||'';
+      const connectedOn=r['Connected On']||r.connectedOn||r.Date||'';
+      const gender=r.Gender||r.gender||'';const industry=r.Industry||r.industry||infInd(company);
+      let lat=parseFloat(r.Latitude||r.lat||0),lng=parseFloat(r.Longitude||r.lng||0);
+      if(!lat||!lng){const ck=`${city},${state}`;if(CITIES[ck]){lat=CITIES[ck][0];lng=CITIES[ck][1]}else{const k=rnd(Object.keys(CITIES));lat=CITIES[k][0]+(Math.random()-.5)*2;lng=CITIES[k][1]+(Math.random()-.5)*2}}
+      return{firstName,lastName,company,position,city,state,school,connectedOn,industry,gender,lat,lng};
+    }).filter(d=>d.firstName||d.lastName);
+    fData=[...allData];upH();renderFilters();renderNodes();renderLegend();hideModal();
+  }});
+}
+
+function infInd(c){if(!c)return'Other';c=c.toLowerCase();
+  if(['deloitte','ey','ernst','pwc','kpmg'].some(x=>c.includes(x)))return'Big 4';
+  if(['bdo','rsm','grant thornton'].some(x=>c.includes(x)))return'Accounting';
+  if(['goldman','morgan stanley','jp morgan'].some(x=>c.includes(x)))return'Banking';
+  if(['blackrock','vanguard','fidelity'].some(x=>c.includes(x)))return'Asset Mgmt';
+  if(['blackstone','kkr','carlyle','bain capital'].some(x=>c.includes(x)))return'Private Equity';
+  if(['mckinsey','bcg','bain &'].some(x=>c.includes(x)))return'Consulting';
+  if(['google','microsoft','amazon','meta','apple','tesla','palantir','stripe'].some(x=>c.includes(x)))return'Technology';
+  if(['citadel','two sigma','point72','bridgewater'].some(x=>c.includes(x)))return'Hedge Fund';
+  if(['raymond james','edward jones','schwab'].some(x=>c.includes(x)))return'Wealth Mgmt';
+  if(['wells fargo','bank of america','citi','usaa'].some(x=>c.includes(x)))return'Banking';
+  return'Other';
+}
+
+// ════════════════════════════════════════════════════════════
+// INIT
+// ════════════════════════════════════════════════════════════
+async function init(){await initMap();loadDemo()}
+init();
+</script>
+</body>
+</html>
